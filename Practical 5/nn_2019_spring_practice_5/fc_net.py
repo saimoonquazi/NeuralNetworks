@@ -210,7 +210,9 @@ class FullyConnectedNet(object):
         self.params['W'+str(self.num_layers)]=np.random.normal(0,weight_scale,hidden_dims[-1]*num_classes).reshape(              (hidden_dims[-1],num_classes))
         # Initialize the final layer biases in the dictionary with zeros
         self.params['b' + str(self.num_layers)] = np.zeros((num_classes))
-                    
+        
+        #If batchnorm is being used, initialize the relevant parameters (gamma and beta).
+        # Maintain the right dimensionality
         if self.use_batchnorm:
             for i in xrange(1,self.num_layers):
                 self.params['beta'+str(i)]=np.zeros(hidden_dims[i-1])
@@ -251,7 +253,6 @@ class FullyConnectedNet(object):
         """
         X = X.astype(self.dtype)
         mode = 'test' if y is None else 'train'
-
         # Set train/test mode for batchnorm params and dropout param since they
         # behave differently during training and testing.
         if self.use_dropout:
@@ -259,7 +260,6 @@ class FullyConnectedNet(object):
         if self.use_batchnorm:
             for bn_param in self.bn_params:
                 bn_param['mode'] = mode
-
         scores = None
         ############################################################################
         # TODO: Implement the forward pass for the fully-connected net, computing  #
@@ -277,7 +277,6 @@ class FullyConnectedNet(object):
         list_cache=[]
         # Make a copy of the input data to make it easier to handle during iterations
         input_data=X.copy()
-        
         # If dropout is being used
         if self.use_dropout:
             # Loop through the layers 
@@ -300,11 +299,24 @@ class FullyConnectedNet(object):
             # Store current cache to Cache list
             list_cache.append(dr_cache_ln)
         
+        # If use of batchnorm is desired
         elif self.use_batchnorm:
+            # Loop throught the layers
             for i in xrange(1,self.num_layers):
-                current_input, batchnorm_cache=affine_bn_relu_forward(input_data,self.params['W'+str(i)],                                                                     self.params['b'+str(i)],self.params['gamma'+str(i)],self.params['beta'+str(i)],self.bn_params[i-1])
+                
+                # Perform Affine forward
+                affine_out, fc_cache = affine_forward(input_data, self.params['W'+str(i)], self.params['b'+str(i)])
+                # Perform Batchnorm first then Relu (Combo 1)
+                bn_out, bn_cache = batchnorm_forward(affine_out, self.params['gamma'+str(i)], 
+                                                     self.params['beta'+str(i)], self.bn_params[i-1])
+                relu_out, relu_cache = relu_forward(bn_out)
+                # Perform Relu activation & then Batchnorm (Combo 2) for Question 2
+                #relu_out, relu_cache = relu_forward(affine_out)
+                #bn_out, bn_cache = batchnorm_forward(relu_out, self.params['gamma'+str(i)], self.params['beta'+str(i)], self.bn_params[i-1])
+                # Store all the cache
+                batchnorm_cache = (fc_cache, bn_cache, relu_cache)
                 list_cache.append(batchnorm_cache)
-                input_data=current_input
+                input_data=relu_out
         
         
         # Otherwise run normal mode
@@ -401,25 +413,38 @@ class FullyConnectedNet(object):
                 grads['W'+str(i+1)]=list_dw[i]
                 grads['b'+str(i+1)]=list_db[i]
         
+        # If use of batchnorm is desired
         elif self.use_batchnorm:
             # Loop through the cached entries for all the intermediary layers
             for i in xrange(len(list_cache)):
+                # Get the last entry from the cache list and store relevant layer caches
                 cache=list_cache.pop()
-                dx, dw, db, dgamma, dbeta=affine_bn_relu_backward(dout,cache)
+                fc_cache, bn_cache, relu_cache = cache
+                # Perform Relu Backward Pass then Batchnorm Backward (Combo1)
+                drelu_out = relu_backward(dout, relu_cache)
+                dbn_out, dgamma, dbeta = batchnorm_backward(drelu_out, bn_cache)
+                dx, dw, db = affine_backward(dbn_out, fc_cache)
+                #Perform Batchnorm Backward then Relu Backward Pass  (Combo2) for Question 2
+                #dbn_out, dgamma, dbeta = batchnorm_backward(dout, bn_cache)
+                #drelu_out = relu_backward(dbn_out, relu_cache)
+                #dx, dw, db = affine_backward(drelu_out, fc_cache)
+                # Store relevant gradients in the containers and update computed dx for next layer
                 list_dw.insert(0,dw)
                 list_db.insert(0,db)
                 list_dgamma.insert(0,dgamma)
                 list_dbeta.insert(0,dbeta)
                 dout=dx        
-                
+            
+            # Regularize the loss and compute the parametric loss for all layers
             para_loss=0
             for i in xrange(len(list_dw)):
                 list_dw[i]+=self.reg*self.params['W'+str(i+1)]
                 para_loss+=np.sum((self.params['W'+str(i+1)])**2)
+                # Store the gradients of Weights and biases for all the layers
                 grads['W'+str(i+1)]=list_dw[i]
                 grads['b'+str(i+1)]=list_db[i]
                 
-                
+            # Calculate the loss and store sore respective gradients of Gamma and beta    
             for i in xrange(len(list_dgamma)):
                 list_dgamma[i]+=self.reg*self.params['gamma'+str(i+1)]
                 list_dbeta[i]+=self.reg*self.params['beta'+str(i+1)]                    
@@ -427,9 +452,8 @@ class FullyConnectedNet(object):
                 grads['gamma'+str(i+1)]=list_dgamma[i]
                 grads['beta'+str(i+1)]=list_dbeta[i]
             
+            # Put it all together to find the total loss.
             loss+=0.5 * self.reg*para_loss
-            
-            
         
         # If dropout is not specified, run normal mode       
         else:       
@@ -465,19 +489,3 @@ class FullyConnectedNet(object):
         ############################################################################
 
         return loss, grads
-
-def affine_bn_relu_forward(x, w, b, gamma, beta, bn_param):
-    affine_out, fc_cache = affine_forward(x, w, b)
-    bn_out, bn_cache = batchnorm_forward(affine_out, gamma, beta, bn_param)
-    relu_out, relu_cache = relu_forward(bn_out)
-    cache = (fc_cache, bn_cache, relu_cache)
-    return relu_out, cache
-
-
-def affine_bn_relu_backward(dout, cache):
-    fc_cache, bn_cache, relu_cache = cache
-    drelu_out = relu_backward(dout, relu_cache)
-    dbn_out, dgamma, dbeta = batchnorm_backward(drelu_out, bn_cache)
-    dx, dw, db = affine_backward(dbn_out, fc_cache)
-    return dx, dw, db, dgamma, dbeta
-

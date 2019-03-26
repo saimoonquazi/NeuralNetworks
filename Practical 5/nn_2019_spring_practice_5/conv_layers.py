@@ -102,26 +102,28 @@ def conv_backward_naive(dout, cache):
     for i in range(N):
         for j in range(C):
             input_pad[i,j]=np.pad(x[i,j],(1,1),'constant',constant_values=(0,0))
-            
-    db=np.zeros((F))
     
+    # Store the derivatives of the biases using the right indices      
+    db=np.zeros((F))
     for i in range(N):
         for j in range(out_H):
             for k in range(out_W):
                 db=db+dout[i,:,j,k]
-                
+    
+    # Store the derivatives of the weights and input data using the right 
     dw=np.zeros(w.shape)
     dx_pad=np.zeros(input_pad.shape)
-    
     for i in range(N):
         for j in range(F):
             for k in range(out_H):
                 for l in range(out_W):
-                    # Extract the Input values to be convoluted
+                    # Extract the Input values that were convoluted
                     x_now=input_pad[i,:,k*stride:k*stride+HH,l*stride:l*stride+WW]
+                    # Update the derivatives of the weights
                     dw[j]=dw[j]+dout[i,j,k,l]*x_now
+                    # Update the derivates of the padded input
                     dx_pad[i,:,k*stride:k*stride+HH,l*stride:l*stride+WW]+=w[j]*dout[i,j,k,l]
-      
+    # Update dx  
     dx=dx_pad[:,:,1:H+1,1:W+1]                
                     
     
@@ -152,13 +154,16 @@ def max_pool_forward_naive(x, pool_param):
     ###########################################################################
     # Extract the dimensions of the input data
     N,C,H,W=x.shape
-    height_pool=pool_param['pool_height']
-    width_pool=pool_param['pool_width']    
+    # Obtain pool height, width & stride from dictionary
+    height_pool=pool_param['pool_height']   
+    width_pool=pool_param['pool_width']
     stride=pool_param['stride']
+    # Calculate the height & width of the output from Maxpooling & initialize container for the output
     out_H=1+(H-height_pool)/stride
     out_W=1+(W-width_pool)/stride
     out=np.zeros((N,C,out_H,out_W))
     
+    # Perform Maxpooling by looping through the input and finding the max values within the maxpool kernel
     for i in range(N):
         for j in range(C):
             for k in range(out_H):
@@ -187,14 +192,19 @@ def max_pool_backward_naive(dout, cache):
     ###########################################################################
     # TODO: Implement the max pooling backward pass                           #
     ###########################################################################
+    # Store input and pool parameters from cache
     x,pool_param=cache
+    # Obtain pool height, width & stride from dictionary
     height_pool=pool_param['pool_height']
     width_pool=pool_param['pool_width']  
     stride=pool_param['stride']
+    # Set the dimensions based out the dout shape
     N,C,out_H,out_W=dout.shape
     
+    # Initialize the derivative of x container with the shape of the input
     dx=np.zeros(x.shape)
     
+    # Loop through the indices and obtain the max dx values
     for i in range(N):
         for j in range(C):
             for k in range(out_H):
@@ -202,6 +212,7 @@ def max_pool_backward_naive(dout, cache):
                     x_now=x[i,j,k*stride:k*stride+height_pool, l*stride:l*stride+width_pool]
                     x_now_max=np.max(x_now)
                     
+                    # Hacked way to find the max values and update dx. Not very clean but made sense to me :)
                     for (m,n) in [(m,n) for m in range(height_pool) for n in range(width_pool)]:
                         if x_now[m,n]==x_now_max:
                             dx[i,j,k*stride+m,l*stride+n]+=dout[i,j,k,l]
