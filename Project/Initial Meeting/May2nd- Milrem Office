@@ -1,0 +1,7 @@
+- Data source : Linear velocity & Angular Velocity
+- Noisy Data & RNN (LSTM)
+- Ground Truth: Lidar Path
+- Classes : Relative Positions?
+- Slipping factors: surface, acceleration, encoder data unreliable
+- Themis Feedback node (RPM->Velocity)
+
